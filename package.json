@@ -8,9 +8,9 @@
     "start": "next start"
   },
   "dependencies": {
-    "next": "^13.5.11",
-    "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "next": "^16.1.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/node": "^25.0.3",
