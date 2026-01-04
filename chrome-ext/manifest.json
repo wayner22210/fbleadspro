@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "FBLeadsPro",
+  "version": "1.0",
+  "description": "Extract and sync Facebook group members.",
+  "permissions": ["scripting", "storage", "activeTab"],
+  "host_permissions": ["https://*.facebook.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.facebook.com/groups/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["utils/extract.js", "sync.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "action": {
+    "default_title": "FBLeadsPro",
+    "default_icon": "icon.png"
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

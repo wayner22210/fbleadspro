@@ -1,0 +1,30 @@
+🧠 FBLeadsPro – Capture Facebook Leads Instantly
+
+FBLeadsPro is a lightweight Chrome extension designed for Facebook marketers, lead generation agencies, and local business owners.
+
+⚡️ Features:
+- Auto-detect lead forms on Facebook
+- Save captured name/email/phone to localStorage
+- Sync to your own Supabase backend (optional)
+- Popup display of most recent lead
+- No signup or monthly fees – use your own data store
+
+🛠 How It Works:
+- Install the extension
+- Visit your Facebook Ad or form
+- Leads are automatically captured
+- View the last lead in the popup
+- (Optional) Push to Supabase via REST API
+
+📦 What You Get:
+- Full source code (Manifest v3, clean JS)
+- Ready-to-upload zip file
+- GitHub repo with instructions
+- Vercel-friendly layout for public hosting
+
+Ideal for:
+✅ Facebook Ads freelancers
+✅ SaaS flippers (resell this)
+✅ SMB owners running lead gen
+
+Built by Wayne on EC2 for SaaS Flip 🔁

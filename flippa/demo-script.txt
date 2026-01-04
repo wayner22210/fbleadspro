@@ -1,0 +1,19 @@
+# FBLeadsPro – Demo Video Script (2–3 mins)
+
+🎥 Overview:
+"Hi, this is a walkthrough of FBLeadsPro — a Chrome extension + web dashboard to extract and manage Facebook group leads."
+
+1. Open a Facebook Group
+   - Show Extract Members button appearing
+   - Click Extract → Alert shows how many found
+
+2. Click Sync to Dashboard
+   - Alert shows success
+
+3. Open Dashboard
+   - Visit http://localhost:3000
+   - Show contact table with synced leads
+   - Click “Download CSV” to export
+
+🧠 Wrap-up:
+"This is a working flip-ready SaaS tool. Chrome extension + dashboard + export + landing page. Ready to rebrand or run as-is."
