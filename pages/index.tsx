@@ -50,7 +50,7 @@ export default function Home() {
                 <td>{l.name}</td>
                 <td>{l.email}</td>
                 <td>{l.phone}</td>
-                <td><a href={l.profile} target="_blank">{l.profile}</a></td>
+                <td><a href={l.profile} target="_blank" rel="noreferrer">{l.profile}</a></td>
                 <td>{new Date(l.created_at).toLocaleString()}</td>
               </tr>
             ))}
