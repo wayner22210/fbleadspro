@@ -1,0 +1,504 @@
+(() => {
+  const DEFAULT_BASE = "http://localhost:3000";
+  const TARGET_COUNT_DEFAULT = 200;
+
+  const state = {
+    extracted: [],
+    isInjected: false,
+    lastStatus: "Ready.",
+    busy: false
+  };
+
+  function nowIso() { return new Date().toISOString(); }
+
+  function normalizeBase(input) {
+    const s = String(input || "").trim();
+    if (!s) return DEFAULT_BASE;
+    return s.replace(/\/+$/, "");
+  }
+
+  function isMembersPage() {
+    const href = location.href;
+    return /\/groups\/[^/]+\/members/.test(href) || /\/groups\/[^/]+\/people/.test(href) || /[?&]view=members/.test(href);
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // --- URL helpers ---
+  function toAbsHref(rawHref) {
+    if (!rawHref) return "";
+    if (rawHref.startsWith("http")) return rawHref;
+    if (rawHref.startsWith("/")) return `${location.origin}${rawHref}`;
+    return "";
+  }
+
+  function unwrapFacebookRedirect(absHref) {
+    // Sometimes FB uses l.php?u=<encoded>
+    try {
+      const u = new URL(absHref);
+      if (u.pathname === "/l.php" && u.searchParams.get("u")) {
+        return decodeURIComponent(u.searchParams.get("u"));
+      }
+    } catch {}
+    return absHref;
+  }
+
+  function looksLikeProfileHref(href) {
+    if (!href) return false;
+
+    try {
+      const u = new URL(href, location.origin);
+      if (!u.hostname.includes("facebook.com")) return false;
+
+      const path = u.pathname || "";
+      const seg = path.split("/").filter(Boolean);
+
+      // ✅ profile.php?id=...
+      if (path === "/profile.php" && u.searchParams.get("id")) return true;
+
+      // ✅ /user/1000...
+      if (seg[0] === "user" && seg[1] && /^\d{6,}$/.test(seg[1])) return true;
+
+      // ✅ /people/Name/1000...
+      if (seg[0] === "people" && seg.length >= 3 && /^\d{6,}$/.test(seg[seg.length - 1])) return true;
+
+      // ✅ /username (single segment)
+      const bannedStarts = new Set([
+        "groups","help","settings","policies","privacy","terms",
+        "marketplace","watch","events","messages","notifications","login","recover",
+        "photo","photos","posts","reel","reels"
+      ]);
+
+      if (seg.length === 1) {
+        const s0 = seg[0].toLowerCase();
+        if (bannedStarts.has(s0)) return false;
+        if (s0 === "profile.php") return false;
+        // usernames can be numbers sometimes but keep basic length gate
+        if (s0.length < 3 || s0.length > 60) return false;
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  function looksLikeGarbageName(name) {
+    const n = (name || "").trim();
+    if (!n) return true;
+    if (n.length < 2) return true;
+    if (n.length > 70) return true;
+
+    const lower = n.toLowerCase();
+    const bad = [
+      "group settings","help center","unread","notifications","settings",
+      "learn more","see more","members","admin","moderator",
+      "add friend","message","follow","invite","joined","loading"
+    ];
+    if (bad.some(b => lower.includes(b))) return true;
+
+    // must have letters
+    const letters = (n.match(/[A-Za-z]/g) || []).length;
+    if (letters < 2) return true;
+
+    return false;
+  }
+
+  function normProfileKey(href) {
+    try {
+      const u = new URL(href, location.origin);
+      const path = u.pathname || "";
+      const seg = path.split("/").filter(Boolean);
+
+      if (path === "/profile.php" && u.searchParams.get("id")) return `id:${u.searchParams.get("id")}`;
+      if (seg[0] === "user" && seg[1]) return `id:${seg[1]}`;
+      if (seg[0] === "people" && seg.length >= 3) return `id:${seg[seg.length - 1]}`;
+      if (seg.length === 1) return `u:${seg[0].toLowerCase()}`;
+
+      return (u.origin + u.pathname).toLowerCase();
+    } catch {
+      return String(href || "").toLowerCase();
+    }
+  }
+
+  function pickNameFromAnchor(a) {
+    // 1) textContent
+    let name = (a.textContent || "").trim();
+    if (name && !looksLikeGarbageName(name)) return name;
+
+    // 2) aria-label
+    const al = (a.getAttribute("aria-label") || "").trim();
+    if (al && !looksLikeGarbageName(al)) return al;
+
+    // 3) nearest strong/span
+    const span = a.querySelector("span");
+    if (span) {
+      const t = (span.textContent || "").trim();
+      if (t && !looksLikeGarbageName(t)) return t;
+    }
+
+    // 4) try parent container text, but keep it tight
+    const p = a.closest("div");
+    if (p) {
+      const t = (p.textContent || "").trim();
+      if (t && t.length <= 60 && !looksLikeGarbageName(t)) return t;
+    }
+
+    return "";
+  }
+
+  async function autoScrollToLoad(targetCount) {
+    const t = Math.max(50, Number(targetCount || TARGET_COUNT_DEFAULT));
+    let lastHeight = 0;
+    let stable = 0;
+
+    setStatus(`⏳ Auto-scroll loading up to ${t}...`);
+
+    for (let i = 0; i < 40; i++) {
+      window.scrollTo(0, document.body.scrollHeight);
+      await sleep(900);
+
+      const h = document.body.scrollHeight;
+      if (h === lastHeight) stable++;
+      else stable = 0;
+      lastHeight = h;
+
+      // crude heuristic: count possible profile-ish anchors
+      const anchors = Array.from(document.querySelectorAll("a[href]"));
+      const profileish = anchors
+        .map(a => unwrapFacebookRedirect(toAbsHref(a.getAttribute("href") || "")))
+        .filter(href => looksLikeProfileHref(href)).length;
+
+      if (profileish >= t) break;
+      if (stable >= 5) break;
+    }
+
+    setStatus(`✅ Done loading. Now click Extract.`);
+  }
+
+  function extractMembersV2() {
+  // Row-scoped extraction: find member "rows" by locating spans that start with "Joined"
+  function findMemberRows() {
+    const spans = Array.from(document.querySelectorAll("span"));
+    const joinedSpans = spans.filter(s => {
+      const t = (s.textContent || "").trim();
+      return t && /^joined\b/i.test(t);
+    });
+
+    const rows = [];
+    const seen = new Set();
+
+    for (const s of joinedSpans) {
+      let el = s;
+      for (let i = 0; i < 8 && el; i++) {
+        el = el.parentElement;
+        if (!el) break;
+
+        const text = (el.textContent || "").trim();
+        if (!text || text.length > 800) continue;
+
+        const profile = pickProfileHrefFromRow(el);
+        if (!profile) continue;
+
+        const name = pickNameFromRow(el);
+        if (!name) continue;
+
+        const key = `${name}::${normProfileKey(profile)}`;
+        if (seen.has(key)) break;
+        seen.add(key);
+
+        rows.push(el);
+        break;
+      }
+    }
+
+    return rows;
+  }
+
+  function pickNameFromRow(rowEl) {
+    const img = rowEl.querySelector('img[alt]');
+    if (img) {
+      const alt = (img.getAttribute("alt") || "").trim();
+      if (alt && !looksLikeGarbageName(alt) && alt.toLowerCase() !== "profile picture") return alt;
+    }
+
+    const anchors = Array.from(rowEl.querySelectorAll("a[href]"));
+    for (const a of anchors) {
+      const al = (a.getAttribute("aria-label") || "").trim();
+      if (al && !looksLikeGarbageName(al)) return al;
+      const t = (a.textContent || "").trim();
+      if (t && !looksLikeGarbageName(t)) return t;
+    }
+    return "";
+  }
+
+  function pickProfileHrefFromRow(rowEl) {
+    const anchors = Array.from(rowEl.querySelectorAll("a[href]"));
+    for (const a of anchors) {
+      const rawHref = a.getAttribute("href") || "";
+      const absHref = unwrapFacebookRedirect(toAbsHref(rawHref));
+      if (!absHref) continue;
+      if (looksLikeProfileHref(absHref)) return absHref;
+    }
+    return "";
+  }
+
+  const rows = findMemberRows();
+
+  const out = [];
+  const seen = new Set();
+
+  for (const row of rows) {
+    const profile = pickProfileHrefFromRow(row);
+    const name = pickNameFromRow(row);
+
+    if (!profile || !name) continue;
+    if (looksLikeGarbageName(name)) continue;
+
+    const key = normProfileKey(profile);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    out.push({
+      name,
+      profile,
+      created_at: nowIso(),
+      status: "New",
+      phone: null,
+      email: null,
+      notes: null
+    });
+  }
+
+  return out;
+}
+
+
+  // --- UI injection ---
+  function setStatus(msg) {
+    state.lastStatus = msg;
+    const el = document.getElementById("__fbleadspro_status");
+    if (el) el.textContent = msg;
+  }
+
+  function cssText() {
+    return `
+#__fbleadspro_wrap {
+
+  try {
+    const btn = document.getElementById("__fbleadspro_close");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        const w = document.getElementById("__fbleadspro_wrap");
+        if (w) w.remove();
+        if (typeof state === "object" && state) state.isInjected = false;
+      });
+    }
+  } catch {}
+  position: fixed;
+  right: 14px;
+  top: 120px;
+  z-index: 999999;
+  width: 240px;
+  background: white;
+  border: 1px solid rgba(0,0,0,.12);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  font-family: Arial, sans-serif;
+}
+#__fbleadspro_hd {
+  position: relative;
+}
+#__fbleadspro_close {
+  position: absolute;
+  right: 10px;
+  top: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: 0.7;
+}
+#__fbleadspro_close:hover {
+  opacity: 1;
+  background: rgba(0,0,0,.06);
+}
+
+#__fbleadspro_hd {
+  padding: 10px 10px 6px;
+  font-weight: 700;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(0,0,0,.08);
+}
+#__fbleadspro_bd { padding: 10px; }
+#__fbleadspro_bd label { display:block; font-size:11px; color:#334155; margin-bottom:6px; }
+#__fbleadspro_bd input {
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,.18);
+  font-size: 12px;
+}
+#__fbleadspro_row { display:flex; gap:8px; margin-top:10px; }
+#__fbleadspro_row button {
+  flex: 1;
+  padding: 9px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(0,0,0,.18);
+  background: #f8fafc;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+}
+#__fbleadspro_row button:hover { background:#eef2ff; }
+#__fbleadspro_status {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #0f172a;
+  color: white;
+  font-size: 11px;
+  white-space: pre-wrap;
+  min-height: 40px;
+}
+`;
+  }
+
+  async function getBaseFromBg() {
+    const res = await chrome.runtime.sendMessage({ type: "FBLEADSPRO_GET_BASE" });
+    if (res && res.ok && res.apiBase) return normalizeBase(res.apiBase);
+    return DEFAULT_BASE;
+  }
+
+  async function setBaseToBg(base) {
+    const res = await chrome.runtime.sendMessage({ type: "FBLEADSPRO_SET_BASE", apiBase: base });
+    return res && res.ok ? normalizeBase(res.apiBase) : normalizeBase(base);
+  }
+
+  async function doSync() {
+    if (state.busy) return;
+    state.busy = true;
+    try {
+      if (!state.extracted.length) {
+        setStatus("⚠️ Nothing to sync.\nClick Extract first.");
+        return;
+      }
+      setStatus(`⏳ Syncing ${state.extracted.length}...`);
+      const res = await chrome.runtime.sendMessage({ type: "FBLEADSPRO_SYNC_ITEMS", items: state.extracted });
+      if (!res || !res.ok) {
+        setStatus(`❌ Sync failed.\n${(res && res.error) || "No response"}\n${res && res.detail ? JSON.stringify(res.detail).slice(0, 300) : ""}`);
+        return;
+      }
+
+      // best-effort show inserted/updated if your API returns it
+      const r = res.result || {};
+      const inserted = r.inserted ?? r.added ?? r.created;
+      const updated = r.updated ?? r.upserted ?? r.merged;
+
+      if (inserted != null || updated != null) {
+        setStatus(`✅ Synced.\ninserted=${inserted ?? "?"} updated=${updated ?? "?"}`);
+      } else {
+        setStatus(`✅ Synced.\n(Refresh dashboard)`);
+      }
+    } finally {
+      state.busy = false;
+    }
+  }
+
+  async function doExtract() {
+    if (state.busy) return;
+    state.busy = true;
+    try {
+      if (!isMembersPage()) {
+        setStatus("❌ Not on Members/People page.\nOpen group → Members tab.");
+        return;
+      }
+
+      // Extract AFTER user has scrolled/loaded
+      const items = extractMembersV2();
+
+      if (!items.length) {
+        setStatus("❌ No members found.\nScroll a bit, then click Load 200, then Extract again.");
+        return;
+      }
+
+      state.extracted = items;
+      setStatus(`✅ Extracted ${items.length} members.\nNow click Sync.`);
+    } finally {
+      state.busy = false;
+    }
+  }
+
+  async function injectUi() {
+    if (state.isInjected) return;
+    state.isInjected = true;
+
+    const style = document.createElement("style");
+    style.textContent = cssText();
+    document.documentElement.appendChild(style);
+
+    const wrap = document.createElement("div");
+    wrap.id = "__fbleadspro_wrap";
+    wrap.innerHTML = `
+      <div id="__fbleadspro_hd">FBLeadsPro <span id="__fbleadspro_close" title="Close">×</span></div>
+      <div id="__fbleadspro_bd">
+        <label>Dashboard URL (API Base)</label>
+        <input id="__fbleadspro_base" placeholder="http://localhost:3000" />
+        <div id="__fbleadspro_row">
+          <button id="__fbleadspro_save">Save</button>
+          <button id="__fbleadspro_open">Open</button>
+        </div>
+        <div id="__fbleadspro_row">
+          <button id="__fbleadspro_load">Load 200 (auto-scroll)</button>
+        </div>
+        <div id="__fbleadspro_row">
+          <button id="__fbleadspro_extract">Extract Members</button>
+        </div>
+        <div id="__fbleadspro_row">
+          <button id="__fbleadspro_sync" style="background:#dcfce7;">Sync to Dashboard</button>
+        </div>
+        <div id="__fbleadspro_status">Ready.</div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    const baseInput = document.getElementById("__fbleadspro_base");
+    baseInput.value = await getBaseFromBg();
+
+    document.getElementById("__fbleadspro_save").addEventListener("click", async () => {
+      const base = normalizeBase(baseInput.value);
+      const saved = await setBaseToBg(base);
+      baseInput.value = saved;
+      setStatus(`✅ Saved:\n${saved}`);
+    });
+
+    document.getElementById("__fbleadspro_open").addEventListener("click", async () => {
+      const base = normalizeBase(baseInput.value);
+      window.open(`${base}/dashboard/contacts`, "_blank", "noreferrer");
+    });
+
+    document.getElementById("__fbleadspro_load").addEventListener("click", async () => {
+      if (!isMembersPage()) {
+        alert("Open the group Members/People page first.");
+        return;
+      }
+      await autoScrollToLoad(TARGET_COUNT_DEFAULT);
+    });
+
+    document.getElementById("__fbleadspro_extract").addEventListener("click", async () => {
+      await doExtract();
+    });
+
+    document.getElementById("__fbleadspro_sync").addEventListener("click", async () => {
+      await doSync();
+    });
+  }
+
+  // Inject once, but only on group pages
+  injectUi().catch(() => {});
+})();

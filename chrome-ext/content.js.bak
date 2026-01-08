@@ -44,48 +44,45 @@
   }
 
   function looksLikeProfileHref(href) {
-  if (!href) return false;
+    if (!href) return false;
 
-  try {
-    const u = new URL(href, location.origin);
-    if (!String(u.hostname || "").includes("facebook.com")) return false;
+    try {
+      const u = new URL(href, location.origin);
+      if (!u.hostname.includes("facebook.com")) return false;
 
-    const path = u.pathname || "";
-    const seg = path.split("/").filter(Boolean);
+      const path = u.pathname || "";
+      const seg = path.split("/").filter(Boolean);
 
-    // ✅ Group member profile-style links:
-    // /groups/<groupId>/user/<userId>/
-    if (seg.length >= 4 && seg[0] === "groups" && seg[2] === "user" && /^\d{6,}$/.test(seg[3])) return true;
+      // ✅ profile.php?id=...
+      if (path === "/profile.php" && u.searchParams.get("id")) return true;
 
-    // ✅ profile.php?id=...
-    if (path === "/profile.php" && u.searchParams.get("id")) return true;
+      // ✅ /user/1000...
+      if (seg[0] === "user" && seg[1] && /^\d{6,}$/.test(seg[1])) return true;
 
-    // ✅ /user/1000...
-    if (seg[0] === "user" && seg[1] && /^\d{6,}$/.test(seg[1])) return true;
+      // ✅ /people/Name/1000...
+      if (seg[0] === "people" && seg.length >= 3 && /^\d{6,}$/.test(seg[seg.length - 1])) return true;
 
-    // ✅ /people/Name/1000...
-    if (seg[0] === "people" && seg.length >= 3 && /^\d{6,}$/.test(seg[seg.length - 1])) return true;
+      // ✅ /username (single segment)
+      const bannedStarts = new Set([
+        "groups","help","settings","policies","privacy","terms",
+        "marketplace","watch","events","messages","notifications","login","recover",
+        "photo","photos","posts","reel","reels"
+      ]);
 
-    // ✅ /username (single segment) - keep a small denylist
-    const bannedStarts = new Set([
-      "groups","help","settings","policies","privacy","terms",
-      "marketplace","watch","events","messages","notifications","login","recover",
-      "photo","photos","posts","reel","reels","pages"
-    ]);
+      if (seg.length === 1) {
+        const s0 = seg[0].toLowerCase();
+        if (bannedStarts.has(s0)) return false;
+        if (s0 === "profile.php") return false;
+        // usernames can be numbers sometimes but keep basic length gate
+        if (s0.length < 3 || s0.length > 60) return false;
+        return true;
+      }
 
-    if (seg.length === 1) {
-      const s0 = (seg[0] || "").toLowerCase();
-      if (bannedStarts.has(s0)) return false;
-      if (s0 === "profile.php") return false;
-      if (s0.length < 3 || s0.length > 60) return false;
-      return true;
+      return false;
+    } catch {
+      return false;
     }
-
-    return false;
-  } catch {
-    return false;
   }
-}
 
   function looksLikeGarbageName(name) {
     const n = (name || "").trim();
@@ -109,24 +106,21 @@
   }
 
   function normProfileKey(href) {
-  try {
-    const u = new URL(href, location.origin);
-    const path = u.pathname || "";
-    const seg = path.split("/").filter(Boolean);
+    try {
+      const u = new URL(href, location.origin);
+      const path = u.pathname || "";
+      const seg = path.split("/").filter(Boolean);
 
-    // /groups/<gid>/user/<uid> => id:<uid>
-    if (seg.length >= 4 && seg[0] === "groups" && seg[2] === "user" && seg[3]) return `id:${seg[3]}`;
+      if (path === "/profile.php" && u.searchParams.get("id")) return `id:${u.searchParams.get("id")}`;
+      if (seg[0] === "user" && seg[1]) return `id:${seg[1]}`;
+      if (seg[0] === "people" && seg.length >= 3) return `id:${seg[seg.length - 1]}`;
+      if (seg.length === 1) return `u:${seg[0].toLowerCase()}`;
 
-    if (path === "/profile.php" && u.searchParams.get("id")) return `id:${u.searchParams.get("id")}`;
-    if (seg[0] === "user" && seg[1]) return `id:${seg[1]}`;
-    if (seg[0] === "people" && seg.length >= 3) return `id:${seg[seg.length - 1]}`;
-    if (seg.length === 1) return `u:${seg[0].toLowerCase()}`;
-
-    return (u.origin + u.pathname).toLowerCase();
-  } catch {
-    return String(href || "").toLowerCase();
+      return (u.origin + u.pathname).toLowerCase();
+    } catch {
+      return String(href || "").toLowerCase();
+    }
   }
-}
 
   function pickNameFromAnchor(a) {
     // 1) textContent
@@ -164,13 +158,6 @@
     for (let i = 0; i < 40; i++) {
       window.scrollTo(0, document.body.scrollHeight);
       await sleep(900);
-
-      // collect members while we scroll (FB virtualizes DOM rows)
-      try {
-        if (typeof window.__fbleadsproCollectVisibleMembersV1 === "function") {
-          window.__fbleadsproCollectVisibleMembersV1();
-        }
-      } catch {}
 
       const h = document.body.scrollHeight;
       if (h === lastHeight) stable++;
@@ -221,6 +208,17 @@
   function cssText() {
     return `
 #__fbleadspro_wrap {
+
+  try {
+    const btn = document.getElementById("__fbleadspro_close");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        const w = document.getElementById("__fbleadspro_wrap");
+        if (w) w.remove();
+        if (typeof state === "object" && state) state.isInjected = false;
+      });
+    }
+  } catch {}
   position: fixed;
   right: 14px;
   top: 120px;
@@ -392,18 +390,6 @@
     `;
     document.body.appendChild(wrap);
 
-    // FBLEADSPRO_CLOSE_BIND_V1 (reliable close binding)
-    try {
-      const btn = document.getElementById("__fbleadspro_close");
-      if (btn) {
-        btn.addEventListener("click", () => {
-          const w = document.getElementById("__fbleadspro_wrap");
-          if (w) w.remove();
-          try { state.isInjected = false; } catch {}
-        });
-      }
-    } catch {}
-
     const baseInput = document.getElementById("__fbleadspro_base");
     baseInput.value = await getBaseFromBg();
 
@@ -471,68 +457,49 @@
   }
 
   function normProfileKey(href) {
-  try {
-    const u = new URL(href, location.origin);
-    const path = u.pathname || "";
-    const seg = path.split("/").filter(Boolean);
-
-    // /groups/<gid>/user/<uid> => id:<uid>
-    if (seg.length >= 4 && seg[0] === "groups" && seg[2] === "user" && seg[3]) return `id:${seg[3]}`;
-
-    if (path === "/profile.php" && u.searchParams.get("id")) return `id:${u.searchParams.get("id")}`;
-    if (seg[0] === "user" && seg[1]) return `id:${seg[1]}`;
-    if (seg[0] === "people" && seg.length >= 3) return `id:${seg[seg.length - 1]}`;
-    if (seg.length === 1) return `u:${seg[0].toLowerCase()}`;
-
-    return (u.origin + u.pathname).toLowerCase();
-  } catch {
-    return String(href || "").toLowerCase();
+    try {
+      const u = new URL(href);
+      u.hash = "";
+      // drop tracking params
+      ["__cft__", "__tn__", "ref", "refid", "refsrc", "hc_ref", "fbclid"].forEach((k) => u.searchParams.delete(k));
+      // keep profile.php?id= if present; otherwise drop query
+      if (u.pathname !== "/profile.php") u.search = "";
+      // normalize trailing slash
+      return u.toString().replace(/\/$/, "");
+    } catch {
+      return (href || "").replace(/\/$/, "");
+    }
   }
-}
 
   function looksLikeProfileHref(href) {
-  if (!href) return false;
+    const h = (href || "").toLowerCase();
+    if (!h) return false;
+    // reject obvious non-profile links
+    if (h.includes("/groups/")) return false;
+    if (h.includes("/help/")) return false;
+    if (h.includes("/marketplace/")) return false;
+    if (h.includes("/watch/")) return false;
+    if (h.includes("/reel/")) return false;
+    if (h.includes("/gaming/")) return false;
+    if (h.includes("/events/")) return false;
+    if (h.includes("/settings")) return false;
 
-  try {
-    const u = new URL(href, location.origin);
-    if (!String(u.hostname || "").includes("facebook.com")) return false;
-
-    const path = u.pathname || "";
-    const seg = path.split("/").filter(Boolean);
-
-    // ✅ Group member profile-style links:
-    // /groups/<groupId>/user/<userId>/
-    if (seg.length >= 4 && seg[0] === "groups" && seg[2] === "user" && /^\d{6,}$/.test(seg[3])) return true;
-
-    // ✅ profile.php?id=...
-    if (path === "/profile.php" && u.searchParams.get("id")) return true;
-
-    // ✅ /user/1000...
-    if (seg[0] === "user" && seg[1] && /^\d{6,}$/.test(seg[1])) return true;
-
-    // ✅ /people/Name/1000...
-    if (seg[0] === "people" && seg.length >= 3 && /^\d{6,}$/.test(seg[seg.length - 1])) return true;
-
-    // ✅ /username (single segment) - keep a small denylist
-    const bannedStarts = new Set([
-      "groups","help","settings","policies","privacy","terms",
-      "marketplace","watch","events","messages","notifications","login","recover",
-      "photo","photos","posts","reel","reels","pages"
-    ]);
-
-    if (seg.length === 1) {
-      const s0 = (seg[0] || "").toLowerCase();
-      if (bannedStarts.has(s0)) return false;
-      if (s0 === "profile.php") return false;
-      if (s0.length < 3 || s0.length > 60) return false;
-      return true;
-    }
-
-    return false;
-  } catch {
+    // accept common profile patterns
+    if (h.includes("facebook.com/profile.php?id=")) return true;
+    if (h.includes("facebook.com/user/")) return true;
+    if (h.includes("facebook.com/people/")) return true;
+    // username style: facebook.com/<something>
+    try {
+      const u = new URL(href);
+      const seg = (u.pathname || "/").split("/").filter(Boolean);
+      if (seg.length === 1) {
+        const s = seg[0];
+        // avoid pages like /groups, /pages, etc handled above
+        if (s && s.length >= 3) return true;
+      }
+    } catch {}
     return false;
   }
-}
 
   function looksLikeGarbageName(s) {
     const t = (s || "").trim();

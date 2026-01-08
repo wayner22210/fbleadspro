@@ -1,12 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
-    <title>FB Leads</title>
-    <link rel="stylesheet" href="styles.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>FBLeadsPro</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 12px; width: 320px; }
+      h1 { font-size: 16px; margin: 0 0 8px; }
+      label { display:block; font-size: 12px; margin: 10px 0 6px; color:#334155; }
+      input { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+      .row { display:flex; gap:8px; margin-top: 10px; }
+      button { flex:1; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; background:#fff; cursor:pointer; }
+      button:hover { background:#f8fafc; }
+      #status { margin-top: 10px; font-size: 12px; padding: 8px; border-radius: 8px; background:#f1f5f9; color:#0f172a; min-height: 34px; white-space: pre-wrap; }
+      .hint { font-size: 11px; color:#64748b; margin-top: 6px; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    </style>
   </head>
   <body>
-    <h1>Last Lead</h1>
-    <div id="leadDisplay">Loading...</div>
+    <h1>FBLeadsPro</h1>
+    <div class="hint">Extract group members and sync to your dashboard.</div>
+
+    <label for="apiBase">Dashboard URL (API Base)</label>
+    <input id="apiBase" type="text" placeholder="http://localhost:3000" />
+
+    <div class="hint">Example: <code>http://localhost:3000</code> or <code>https://your-domain.com</code></div>
+
+    <div class="row">
+      <button id="saveBtn">Save</button>
+      <button id="openBtn">Open Dashboard</button>
+    </div>
+
+    <div class="row">
+      <button id="extractBtn">Extract</button>
+      <button id="syncBtn">Sync</button>
+    </div>
+
+    <div id="status">Ready.</div>
+
     <script src="popup.js"></script>
   </body>
 </html>
