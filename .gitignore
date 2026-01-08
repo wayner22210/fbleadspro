@@ -21,3 +21,4 @@ bfg.jar
 # OS
 .DS_Store
 .env.local
+.vercel
