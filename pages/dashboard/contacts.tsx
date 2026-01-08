@@ -508,3 +508,8 @@ export default function ContactsPage() {
     </AppShell>
   );
 }
+
+export async function getServerSideProps() {
+  // Force this page to be dynamic on Vercel so proxy.ts auth runs.
+  return { props: {} };
+}
