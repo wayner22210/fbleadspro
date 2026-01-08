@@ -212,7 +212,7 @@ async function deleteOneSupabase(id: string) {
 async function clearAllSupabase() {
   const sb = getSupabaseAdmin();
   if (!sb) throw new Error('Supabase admin not configured');
-  const { error } = await sb.from('fb_contacts').delete().neq('id', '__never__');
+  const { error } = await sb.from('fb_contacts').delete().not('id', 'is', null);
   if (error) throw error;
 }
 
